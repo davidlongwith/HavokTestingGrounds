@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+        <title>Babylon.js sample code</title>
+
+        <!-- Babylon.js -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.6.2/dat.gui.min.js"></script>
+        <script src="https://assets.babylonjs.com/generated/Assets.js"></script>
+        <script src="https://cdn.babylonjs.com/recast.js"></script>
+        <script src="https://cdn.babylonjs.com/ammo.js"></script>
+        <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
+        <script src="https://cdn.babylonjs.com/cannon.js"></script>
+        <script src="https://cdn.babylonjs.com/Oimo.js"></script>
+        <script src="https://cdn.babylonjs.com/earcut.min.js"></script>
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+        <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+        <script src="https://cdn.babylonjs.com/proceduralTexturesLibrary/babylonjs.proceduralTextures.min.js"></script>
+        <script src="https://cdn.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
+        <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.js"></script>
+        <script src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.min.js"></script>
+        <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+        <script src="https://cdn.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
+
+        <style>
+            html, body {
+                overflow: hidden;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            #renderCanvas {
+                width: 100%;
+                height: 100%;
+                touch-action: none;
+            }
+            
+            #canvasZone {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+<body>
+    <div id="canvasZone"><canvas id="renderCanvas"></canvas></div>
+    <script>
+        var canvas = document.getElementById("renderCanvas");
+
+        var startRenderLoop = function (engine, canvas) {
+            engine.runRenderLoop(function () {
+                if (sceneToRender && sceneToRender.activeCamera) {
+                    sceneToRender.render();
+                }
+            });
+        }
+
+        var engine = null;
+        var scene = null;
+        var sceneToRender = null;
+        var createDefaultEngine = function() { return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true,  disableWebGL2Support: false}); };
+        //
+        //  Havok Testing Grounds v0.1
+        //
+        
+            //  Physics checklist
+            //
+            //  Visual:
+            //    Mesh + Material
+            //    
+            //  Physics: 
+            //    Body, Shape, Material
+            //      -or-
+            //    Aggregate
+            //
+        
+        /*  GUI Setup
+        __________________________________*/
+        
+            function createGUI(scene, sphereDropFunction) {
+                // Graphical User Interface setup
+                var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+        
+                // GUI stack configuration
+                var panel = new BABYLON.GUI.StackPanel();
+                panel.spacing = 5;
+                advancedTexture.addControl(panel);
+                panel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+                panel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                panel.paddingLeftInPixels = 10;
+                panel.paddingTopInPixels = 10;
+                panel.width = "180px";
+        
+                // Attach button functionality using the sphereDropFunction parameter
+                const dropBtn = AddBtn("Sphere Drop", panel, () => {
+                    sphereDropFunction(scene);
+                });
+        
+                // Debug Viewer
+                var viewer = null;
+                const viewerCheckbox = AddToggle("Physics Viewer", panel);
+                viewerCheckbox.isChecked = false;
+                viewerCheckbox.onIsCheckedChangedObservable.add((value) => {
+                    if (value) {
+                        viewer = new BABYLON.Debug.PhysicsViewer(scene);
+                        for (let mesh of scene.meshes) {
+                            if (mesh.physicsBody) {
+                                viewer.showBody(mesh.physicsBody);
+                            }
+                        }
+                    } else {
+                        if (viewer) {
+                            viewer.dispose();
+                            viewer = null;
+                        }
+                    }
+                });
+            }
+        
+            // GUI Helper function (reusable)
+            const AddBtn = function(text, panel, clickFn) {
+                const addBtn = BABYLON.GUI.Button.CreateSimpleButton("btn_"+text.slice(0,5), text);
+                panel.addControl(addBtn);
+                addBtn.width = "100%";
+                addBtn.height = "40px";
+                addBtn.background = "green";
+                addBtn.color = "white";
+                addBtn.onPointerClickObservable.add(clickFn);
+                return addBtn;
+            };
+        
+            // GUI Helper function (reusable)
+            var AddToggle = function(toggleText, panel) {
+                var toggleViewLine = new BABYLON.GUI.StackPanel("toggleViewLine");
+                toggleViewLine.isVertical = false;
+                toggleViewLine.horizontalAlignment =
+                    BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                toggleViewLine.spacing = 5;
+                toggleViewLine.resizeToFit = true;
+                toggleViewLine.height = "25px";
+                panel.addControl(toggleViewLine);
+                var checkbox = new BABYLON.GUI.Checkbox();
+                checkbox.verticalAlignment = 0; //BABYLON.Control.VERTICAL_ALIGNMENT_TOP;
+                checkbox.width = "20px";
+                checkbox.height = "20px";
+                checkbox.isChecked = false;
+                checkbox.color = "green";
+                toggleViewLine.addControl(checkbox);
+                toggleViewLine.paddingTop = 2;
+        
+                var checkboxText = new BABYLON.GUI.TextBlock(
+                    "checkboxText",
+                    toggleText
+                );
+                checkboxText.resizeToFit = true;
+                checkboxText.color = "gray";
+                toggleViewLine.addControl(checkboxText);
+                return checkbox;
+            };
+        
+        /*  Procedural Ground
+        __________________________________*/
+        
+            function createGround(scene, width, height) {
+                // Our built-in 'ground' shape.
+                var ground = BABYLON.MeshBuilder.CreateGround("ground", { width: width, height: height }, scene);
+        
+                var grassMaterial = new BABYLON.StandardMaterial("grassMaterial", scene);
+                var grassTexture = new BABYLON.GrassProceduralTexture("grassTexture", 2048, scene);
+                grassMaterial.ambientTexture = grassTexture;
+                ground.material = grassMaterial;
+                ground.receiveShadows = true;  // Allow shadows (shadow generator)
+        
+            // 
+            //  groundAggregate physics bug, define manually for now
+            //
+        
+            /*
+                // add Havok physics to ground
+                var groundAggregate = new BABYLON.PhysicsAggregate(
+                    ground,
+                    BABYLON.PhysicsShapeType.BOX,
+                    {
+                        mass: 0
+                    },
+                    scene
+                );
+            */
+        
+                var body = new BABYLON.PhysicsBody(ground, BABYLON.PhysicsShapeType.BOX, true, scene);
+                body.disablePreStep = false;  // default=true for performance reasons
+                body.setMassProperties(
+                    {
+                    mass: 0,  // stationary object
+                    restitution: 0.5,
+                    friction: 1
+                    }
+                );
+                var shape = new BABYLON.PhysicsShapeMesh(
+                    ground,   // mesh from which to calculate the collisions
+                    scene
+                );
+                const material = {friction: 1, restitution: 0.3};   // sliding resistance and bounciness
+                shape.material = material;                          // assign material to physics shape
+                body.shape = shape;
+        
+                return ground;
+            }
+        
+        /*  Procedural SkyBox
+        __________________________________*/
+        
+            const createSky = (scene) => {
+                const boxCloud = BABYLON.MeshBuilder.CreateSphere("boxCloud", {segments: 10, diameter: 2000}, scene);
+                boxCloud.position = new BABYLON.Vector3(0, 0, 12);
+                const cloudMaterial = new BABYLON.StandardMaterial("cloudMat", scene);
+                const cloudProcText = new BABYLON.CloudProceduralTexture("cloud", 2048, scene);
+                cloudMaterial.emissiveTexture = cloudProcText;
+                cloudMaterial.backFaceCulling = false;
+                cloudMaterial.emissiveTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+                boxCloud.material = cloudMaterial;
+        
+                return boxCloud;
+            }
+        
+        /*  Floating Plane
+        __________________________________*/
+        
+            function createPlane(scene) {
+        
+                var plane = BABYLON.MeshBuilder.CreatePlane("plane", {
+                    height: 2.5, 
+                    width: 2, 
+                    sideOrientation: BABYLON.Mesh.DOUBLESIDE    // make both sides visible
+                });
+                const planeMaterial = new BABYLON.StandardMaterial("material");
+                planeMaterial.emissiveColor = new BABYLON.Color3(0.41, 0.41, 0.41);
+                plane.material = planeMaterial;
+                plane.receiveShadows = true;  // Allow shadows (shadow generator)
+                plane.position.y = 2.5;
+        
+                // attach a physics body
+                var body = new BABYLON.PhysicsBody(plane, BABYLON.PhysicsMotionType.ANIMATED, false, scene);
+                // allow PreStep that updates Physics Body from Transform Node Translation/Orientation
+                body.disablePreStep = false;  // default=true for performance reasons
+                body.setMassProperties(
+                    {
+                        mass: 0,  // stationary object
+                    }
+                );
+                // create physics shape to represent mesh
+                var shape = new BABYLON.PhysicsShapeMesh(
+                    plane,   // mesh from which to calculate the collisions
+                    scene
+                );
+                // add a material to new physics shape, then add to physics body
+                const material = {friction: 0.2, restitution: 0.3};  // sliding resistance and bounciness
+                shape.material = material;                           // assign material to physics shape
+                body.shape = shape;                                  // attach physics mesh shape to physics body
+        
+                // display local axes
+                const localAxes = new BABYLON.AxesViewer(scene, 1);
+                localAxes.xAxis.parent = plane;  // red
+                localAxes.yAxis.parent = plane;  // green
+                localAxes.zAxis.parent = plane;  // blue
+        
+                return plane;
+        
+                // Add rotation in registerBeforeRender
+            }
+        
+        /*  Stacks of Boxes (instances)
+        __________________________________*/
+        
+            // helper
+            function getRandomHeight(min, max) {
+                return Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+            // helper
+            function getRandomPosition(min, max) {
+                return Math.random() * (max - min) + min;
+            }
+        
+            // creates vertical stack of boxes with given parameters
+            function createBoxStack(scene, shadowGen, rootBox, size, numBoxes, pos, yOffset) {
+                for (let i = 0; i < numBoxes; i++) {
+                    var newInstance = rootBox.createInstance("boxInstance" + i);
+                    newInstance.position = pos.clone();
+                    newInstance.position.y += i * (yOffset + size) + 0.5;
+                    shadowGen.addShadowCaster(newInstance); // cast shadows
+                    const agg = new BABYLON.PhysicsAggregate(newInstance, BABYLON.PhysicsShapeType.BOX, 
+                    {
+                        mass: 1, 
+                        startAsleep: false 
+                    }, 
+                    scene);
+                }
+            }
+        
+            // Main Function: create invisible root box for instances and start making stacks
+            function createBoxStacks(scene, shadowGen, size, heightRange, numStacks, yOffset, ground, rangeX, rangeZ) {
+                // Create the root box mesh
+                var rootBox = BABYLON.MeshBuilder.CreateBox("rootBox", { size: size }, scene);
+                rootBox.position.y = -2.5;  // move below ground just in case we need it visible again for more cubes
+                rootBox.isVisible = false;  // hide the root box
+                rootBox.material = new BABYLON.StandardMaterial("boxMat", scene);
+                rootBox.material.diffuseColor = new BABYLON.Color3(0, 0, 1);
+                rootBox.material.specularColor = new BABYLON.Color3(0, 0, 1);
+        
+                // generate stacks data for random box count and postion (dynamic function defines ranges)
+                for (let i = 0; i < numStacks; i++) {
+                    var randomHeight = getRandomHeight(heightRange.min, heightRange.max);
+                    var randomX = getRandomPosition(rangeX.min, rangeX.max);
+                    var randomZ = getRandomPosition(rangeZ.min, rangeZ.max);
+                    // make a stack
+                    createBoxStack(scene, shadowGen, rootBox, size, randomHeight, new BABYLON.Vector3(randomX, 0, randomZ), yOffset);
+                }
+            }
+        
+        /*  Scene
+        __________________________________*/
+        
+            var createScene = function () {
+                var scene = new BABYLON.Scene(engine);
+                scene.clearColor = new BABYLON.Color3(0.8, 0.8, 0.8);  // set new default color
+                var gravityVector = new BABYLON.Vector3(0, -9.81, 0);
+                var physicsPlugin = new BABYLON.HavokPlugin();
+                scene.enablePhysics(gravityVector, physicsPlugin);
+        
+                const worldAxes = new BABYLON.AxesViewer(scene, 3); // add x,y,z world axis pointers
+                worldAxes.update(
+                    new BABYLON.Vector3(-6, 0.5, -7),   // position
+                    BABYLON.Axis.X,                     // red
+                    BABYLON.Axis.Y,                     // green
+                    BABYLON.Axis.Z                      // blue
+                );
+        
+            /* Camera 
+            _____________________________*/
+        
+            // ArcRotateCamera("name", alpha_angle, beta_angle, radius, target_position);
+            var camera = new BABYLON.ArcRotateCamera(
+                "Camera",
+                0,
+                0,
+                0,
+                new BABYLON.Vector3(-6, 10, 28)  // target position (overides manual settings above)
+            );
+            camera.setTarget(BABYLON.Vector3.Zero());                   // This aims the camera to scene origin
+            // set camera restrictions using alpha/beta limits (using radians instead of Math.PI)
+            camera.lowerBetaLimit = BABYLON.Tools.ToRadians(30);        // camera not too high (Beta 0 straight up)
+            camera.upperBetaLimit = BABYLON.Tools.ToRadians(85);        // camera limit just above ground level (Beta 90 horizon)
+            camera.wheelDeltaPercentage = 0.01;                         // zoom slows as approaching target (percentage of the camera radius)
+            camera.attachControl(canvas, true);                         // This attaches the camera to the canvas (required)
+            camera.useAutoRotationBehavior = true;                      // enable built-in auto rotation of camera
+            camera.autoRotationBehavior.idleRotationSpeed = -0.05;      // set auto rotation speed (reverse negative)
+            camera.autoRotationBehavior.idleRotationWaitTime = 100;     // wait after interaction (ms)
+            camera.autoRotationBehavior.idleRotationSpinupTime = 8000;  // time to get up to speed (ms)
+            camera.autoRotationBehavior.zoomStopsAnimation = false;
+            // allow scene interaction (gui) without disrupting camera rotation
+            scene.onPrePointerObservable.remove(camera.autoRotationBehavior._onPrePointerObservableObserver)
+        
+            /* Global Lighting 
+            _____________________________*/
+        
+            //Light direction is directly down from everywhere(and shadow capable)
+            var light = new BABYLON.DirectionalLight("DirectionalLight", new BABYLON.Vector3(0, -1, 0), scene);
+            light.position = new BABYLON.Vector3(0, 100, 0);
+            light.intensity = 0.35;
+            
+            // Shadow generator (caster and reciever required)
+            const shadowGen = new BABYLON.ShadowGenerator(2048, light);  // quality, light source
+        
+            /* Create Ground 
+            _____________________________*/
+        
+            // set ground parameters and call it
+            // (ground variables set world size! (have dependents))
+            var groundWidth = 50;
+            var groundHeight = 50;
+            var ground = createGround(scene, groundWidth, groundHeight);
+        
+            /* Skybox 
+            _____________________________*/
+        
+            createSky(scene);
+        
+            /* Objects - create plane
+            _____________________________*/
+        
+            var plane = createPlane(scene);
+        
+            /* Objects - Stacks of Boxes
+            _____________________________*/
+        
+            // Box Stack placement settings
+            var boxesSize = 0.5;
+            var boxesHeightRange = { min: 5, max: 12 };
+            var numStacks = 55;
+            var yOffset = 0.3;
+            var placementRangeX = {
+                min: -groundWidth / 2 + boxesSize / 2,
+                max: groundWidth / 2 - boxesSize / 2
+            };
+            var placementRangeZ = {
+                min: -groundHeight / 2 + boxesSize / 2,
+                max: groundHeight / 2 - boxesSize / 2
+            };
+            // invoke function
+            createBoxStacks(
+                scene, 
+                shadowGen, 
+                boxesSize, 
+                boxesHeightRange, 
+                numStacks, 
+                yOffset, 
+                ground, 
+                placementRangeX, 
+                placementRangeZ
+            );
+        
+            /* Objects - Sphere Drop
+            _____________________________*/
+        
+            const sphereDrop = () => {
+                var sphere = BABYLON.MeshBuilder.CreateSphere("sphere", {diameter: 0.75, segments: 32}, scene);
+                sphere.position.y = 10;
+                shadowGen.addShadowCaster(sphere);
+                const agg = new BABYLON.PhysicsAggregate(sphere, BABYLON.PhysicsShapeType.SPHERE, 
+                { 
+                    mass: 1,
+                    restitution: 0.4
+                },
+                scene);
+            };
+        
+        
+            /* Shadows
+            _____________________________*/
+        
+            shadowGen.getShadowMap().renderList.push(plane);
+        
+            /* GUI
+            _____________________________*/
+        
+            createGUI(scene, sphereDrop);
+        
+            /* Register Before Render
+            _____________________________*/
+        
+            //
+            //  Plane Rotation
+            //
+        
+            // set variables for plane animation 60fps
+            //
+            // direction vector for rotate axis (imagine arrow beaming from origin to this point)
+            const axisX = new BABYLON.Vector3(10, 0, 0);  // axis for rotation (x,y,z)
+            const axisY = new BABYLON.Vector3(0, 10, 0);
+            const axisZ = new BABYLON.Vector3(0, 0, 10);
+            
+            const angleX = 0.005;  // radian angle to rotate on set axis
+            const angleY = 0.005;
+            const angleZ = 0.005;
+        
+            // set initial tilt (axis, radian amount, space)
+            plane.rotate(axisX, 0.8, BABYLON.Space.LOCAL);
+        
+            // execute every frame (60fps)
+            scene.registerBeforeRender(function () {
+                //
+                // (rotation axis, radian angle update, "LOCAL" -or- "WORLD" coords)
+                //
+                //plane.rotate(axisX, angleX, BABYLON.Space.LOCAL);
+                plane.rotate(axisY, angleY, BABYLON.Space.WORLD);
+                //plane.rotate(axisZ, angleZ, BABYLON.Space.LOCAL);
+            });
+                
+            return scene;
+        };
+        
+                window.initFunction = async function() {
+                    
+                    globalThis.HK = await HavokPhysics();
+                    
+                    var asyncEngineCreation = async function() {
+                        try {
+                        return createDefaultEngine();
+                        } catch(e) {
+                        console.log("the available createEngine function failed. Creating the default engine instead");
+                        return createDefaultEngine();
+                        }
+                    }
+
+                    window.engine = await asyncEngineCreation();
+        if (!engine) throw 'engine should not be null.';
+        startRenderLoop(engine, canvas);
+        window.scene = createScene();};
+        initFunction().then(() => {sceneToRender = scene                    
+        });
+
+        // Resize
+        window.addEventListener("resize", function () {
+            engine.resize();
+        });
+    </script>
+</body>
+</html>
