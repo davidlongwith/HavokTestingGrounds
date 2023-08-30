@@ -9,10 +9,6 @@ Havok, Physics, ArcRotateCamera, autoRotationBehavior, instances, rotate
 
 Live Demo: https://davidlongwith.github.io/HavokTestingGrounds/
 
-## Playground code (v0.1)
-
-https://playground.babylonjs.com/#DTLYUS
-
 ## Local Web Server
 
 Very basic Babylon.js webpages
